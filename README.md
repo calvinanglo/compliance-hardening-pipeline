@@ -6,348 +6,146 @@ Ansible automation for enforcing CIS benchmarks across network infrastructure an
 
 This pipeline automates security compliance enforcement and continuous auditing. Instead of manually checking whether SSH v2 is enabled on 50 servers, you run a playbook once and get a compliance report showing exactly which hosts fail and why.
 
-The three main playbooks:
-
+The four main playbooks:
 - **cisco-audit.yml** — Connects to network devices, grabs running configs, checks them against hardening standards, reports gaps
-- - **linux-hardening.yml** — Enforces CIS Level 1 + Level 2 controls on Ubuntu/Debian: SSH config, file permissions, auditd, kernel parameters
-  - - **windows-hardening.yml** — GPO + PowerShell hardening for Windows 10/11 workstations: UAC, Windows Firewall, audit policies
-    - - **compliance-report.yml** — Aggregates all audit results into HTML and JSON reports with risk scoring
-     
-      - ## What You Get
-     
-      - After running the pipeline, you have:
-     
-      - 1. **Audit Results** — HTML report showing what's compliant and what's not
-        2. 2. **Hardened Systems** — All non-compliant configs automatically fixed
-           3. 3. **Audit Trail** — YAML files tracking every change (integrates with Git for ITIL CAB approval)
-              4. 4. **Risk Scoring** — CVSS-based severity on each finding
-                 5. 5. **Ansible Facts** — Saved for trend analysis and historical compliance tracking
-                   
-                    6. ## Architecture
-                   
-                    7. ```
-                       [Ansible Controller — VLAN 30]
-                       │
-                       ├─→ [Cisco L3 Switch]      ← SSH pull config, check SSH v2, encryption, SNMP, NTP
-                       │                            → Reports: 8/10 checks pass, fix 2 failures
-                       │
-                       ├─→ [Ubuntu servers]        ← Apply CIS hardening playbook
-                       │   ├─ SSH: PermitRootLogin=no, MaxAuthTries=4
-                       │   ├─ Auditd: enable, audit rules for logins
-                       │   ├─ Sysctl: disable IPv6, enable IP forwarding controls
-                       │   └─ Reports: 42/45 controls pass, 3 manual items require review
-                       │
-                       ├─→ [Windows workstations]  ← Apply GPO + PowerShell hardening
-                       │   ├─ UAC enforcement
-                       │   ├─ Windows Firewall rules
-                       │   ├─ BitLocker/encryption
-                       │   └─ Reports: 38/40 controls pass
-                       │
-                       └─→ [Compliance Report Engine]
-                           └─ Aggregates all results → HTML + JSON + JIRA tickets for gaps
-                       ```
+- **linux-hardening.yml** — Enforces CIS Level 1 + Level 2 controls on Ubuntu/Debian: SSH config, file permissions, auditd, kernel parameters
+- **windows-hardening.yml** — GPO + PowerShell hardening for Windows 10/11 workstations: UAC, Windows Firewall, audit policies
+- **compliance-report.yml** — Aggregates audit results from all playbooks into a single HTML report
 
-                       ## Quick Start
+## How It Works
 
-                       Prerequisites:
+```
+Ansible control node
+    |
+    ├─→ [Cisco L3 Switch]      ← SSH, check SSH v2, SNMP v3, NTP, ACLs
+    │                            → Reports: pass/fail per control
+    │
+    ├─→ [Ubuntu servers]        ← Apply CIS hardening playbook
+    │   ├─ SSH: PermitRootLogin=no, MaxAuthTries=4
+    │   ├─ Auditd: enable, load login audit rules
+    │   ├─ Sysctl: disable IPv6 forwarding, enable rp_filter
+    │   └─ Reports: pass/fail per control with remediation notes
+    │
+    ├─→ [Windows workstations]  ← Apply PowerShell hardening
+    │   ├─ UAC enforcement
+    │   ├─ Windows Firewall rules
+    │   └─ Reports: pass/fail per control
+    │
+    └─→ [Compliance Report]     ← Aggregated HTML/JSON report
+        └─ Saved to reports/ directory with timestamp
+```
 
-                       - Ansible 2.9+ on controller (VLAN 30 jump box)
-                       - - SSH access to Cisco devices (IP SSH enabled, username/key in inventory)
-                         - - WinRM or SSH access to Windows hosts (WinRM on port 5985)
-                           - - sudo/root access on Linux systems
-                            
-                             - 1. **Clone and inventory:**
-                              
-                               2. ```bash
-                                  git clone https://github.com/calvinanglo/compliance-hardening-pipeline.git
-                                  cd compliance-hardening-pipeline
-                                  # Edit inventory/hosts.yml with your device IPs and credentials
-                                  ```
+## Quick Start
 
-                                  2. **Run Cisco audit only:**
-                                 
-                                  3. ```bash
-                                     ansible-playbook playbooks/cisco-audit.yml -i inventory/hosts.yml
-                                     # Outputs: reports/cisco-audit-TIMESTAMP.html
-                                     ```
+```bash
+# clone and install dependencies
+git clone https://github.com/calvinanglo/compliance-hardening-pipeline
+cd compliance-hardening-pipeline
+pip install ansible ansible-lint
+ansible-galaxy collection install cisco.ios community.windows
 
-                                     3. **Harden Linux servers:**
-                                    
-                                     4. ```bash
-                                        ansible-playbook playbooks/linux-hardening.yml -i inventory/hosts.yml --tags cis-level-1
-                                        # Applies SSH hardening, file permissions, auditd, kernel parameters
-                                        ```
+# update inventory with your device IPs and credentials
+vi inventory/hosts.yml
 
-                                        4. **Full compliance report:**
-                                       
-                                        5. ```bash
-                                           ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml
-                                           # Generates: reports/compliance-summary-TIMESTAMP.html
-                                           ```
+# dry run first - always check before applying
+ansible-playbook playbooks/linux-hardening.yml -i inventory/hosts.yml --check
 
-                                           ## File Structure
+# run cisco audit
+ansible-playbook playbooks/cisco-audit.yml -i inventory/hosts.yml
 
-                                           ```
-                                           ├── playbooks/
-                                           │   ├── cisco-audit.yml              # Cisco config audit
-                                           │   ├── linux-hardening.yml          # CIS Linux benchmarks
-                                           │   ├── windows-hardening.yml        # Windows hardening (GPO + PowerShell)
-                                           │   └── compliance-report.yml        # Report aggregation
-                                           │
-                                           ├── roles/
-                                           │   ├── cisco-hardening/             # Tasks: SSH, SNMP, NTP, ACL checks
-                                           │   ├── linux-cis/                   # Tasks: SSH, sysctl, auditd, file perms
-                                           │   ├── windows-hardening/           # Tasks: UAC, firewall, audit
-                                           │   └── audit-report/                # Jinja2 templates for HTML reports
-                                           │
-                                           ├── inventory/
-                                           │   ├── hosts.yml                    # Device IPs, credentials, groups
-                                           │   └── group_vars/                  # Per-group variables (versions, settings)
-                                           │
-                                           ├── templates/
-                                           │   ├── audit-report.html.j2         # HTML report template
-                                           │   ├── compliance-summary.json.j2   # JSON export for dashboards
-                                           │   └── change-record.md.j2          # ITIL change template
-                                           │
-                                           ├── vars/
-                                           │   ├── cis-linux-level-1.yml        # CIS control definitions
-                                           │   ├── cis-cisco-hardening.yml      # Cisco hardening standards
-                                           │   └── windows-controls.yml         # Windows security baselines
-                                           │
-                                           └── docs/
-                                               ├── cisco-hardening-standard.md  # Cisco requirements
-                                               ├── linux-cis-guide.md           # What each Linux control does
-                                               ├── windows-baselines.md         # Windows security controls
-                                               └── itil-change-process.md       # How to integrate with CAB
-                                           ```
+# harden linux servers (CIS Level 1 only)
+ansible-playbook playbooks/linux-hardening.yml -i inventory/hosts.yml --tags cis-level-1
 
-                                           ## Key Playbooks
+# harden windows workstations
+ansible-playbook playbooks/windows-hardening.yml -i inventory/hosts.yml
 
-                                           ### cisco-audit.yml
+# generate full compliance report across all hosts
+ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml
+```
 
-                                           Audits Cisco device running configs against hardening checklist:
+## Repo Structure
 
-                                           - SSH v2 enabled
-                                           - - No default SNMP community strings (public/private)
-                                             - - NTP configured
-                                               - - No unused interfaces in UP state
-                                                 - - Password encryption enabled
-                                                   - - Logging configured
-                                                     - - Access lists restrict management access
-                                                      
-                                                       - Reports pass/fail + remediation steps for each failure.
-                                                      
-                                                       - ### linux-hardening.yml
-                                                      
-                                                       - Implements CIS Benchmarks Level 1 and Level 2:
-                                                      
-                                                       - **Level 1 (6 hours to implement):**
-                                                       - - Disable unused filesystems (cramfs, freevxfs, jffs2, hfs, hfsplus, udf)
-                                                         - - Set SELinux/AppArmor to enforcing (if applicable)
-                                                           - - SSH hardening: PermitRootLogin=no, MaxAuthTries=4, PermitEmptyPasswords=no, Protocol 2
-                                                             - - Enable auditd and configure audit rules
-                                                               - - Enable file integrity monitoring
-                                                                
-                                                                 - **Level 2 (4 hours):**
-                                                                 - - Sysctl hardening: IP forwarding, ICMP redirects, TCP SYN cookies
-                                                                   - - PAM (Pluggable Authentication Modules): lockout after 5 failed attempts
-                                                                     - - Enable AIDE for file integrity
-                                                                       - - Restrict SSH access by user/group
-                                                                         - - Configure sudo logging to syslog
-                                                                          
-                                                                           - ### windows-hardening.yml
-                                                                          
-                                                                           - Applies security baselines to Windows 10/11:
-                                                                          
-                                                                           - - Enable UAC (User Account Control)
-                                                                             - - Windows Firewall: enable inbound/outbound rules
-                                                                               - - Disable unnecessary services (RDP, NetBIOS, LLMNR)
-                                                                                 - - BitLocker encryption enforcement
-                                                                                   - - Audit policy: log successful/failed logins
-                                                                                     - - Windows Update: auto-download and schedule install
-                                                                                      
-                                                                                       - ## Compliance Report Output
-                                                                                      
-                                                                                       - After running `compliance-report.yml`, you get:
-                                                                                      
-                                                                                       - **HTML Summary:**
-                                                                                      
-                                                                                       - ```
-                                                                                         COMPLIANCE SUMMARY — 2026-04-04
-                                                                                         ================================
-                                                                                         Environment: Production (10.10.0.0/16 network)
-                                                                                         Report Generated: 2026-04-04 14:32:00
-                                                                                         Next Audit: 2026-04-11
+```
+compliance-hardening-pipeline/
+  playbooks/
+    cisco-audit.yml              # Cisco device hardening audit
+    linux-hardening.yml          # CIS Ubuntu Level 1 + Level 2
+    windows-hardening.yml        # Windows 10/11 hardening
+    compliance-report.yml        # Aggregate report generation
+  inventory/
+    hosts.yml                    # Device IPs, credentials, groups
+  docs/
+    itil-change-process.md       # Change management integration guide
+```
 
-                                                                                         OVERALL COMPLIANCE: 87% (125 / 144 controls pass)
+## Key Playbooks
 
-                                                                                         By Category:
-                                                                                         - Network Devices:     90% (9 / 10 pass)   1 finding: SNMP v1 still enabled on old router
-                                                                                         - Linux Servers:       88% (21 / 24 pass)  3 findings: 2 manual reviews, 1 AppArmor config
-                                                                                         - Windows Workstns:    84% (8 / 10 pass)   2 findings: BitLocker not enforced on 2 machines
+### cisco-audit.yml
 
-                                                                                         CRITICAL FINDINGS (fix immediately):
-                                                                                         1. Router1 still using SNMP v1 — Risk: Easy credential disclosure
-                                                                                            → Action: disable snmp-server community public
-                                                                                            → Change ID: CHG-143 (pending CAB approval, scheduled 2026-04-10)
+Connects via SSH (network_cli) and runs show commands to verify hardening state. Checks SSH version, SNMP version, NTP sync, ACL presence, and unused service disablement. Outputs a per-device pass/fail report to /tmp/audit_reports/.
 
-                                                                                         HIGH FINDINGS (fix this sprint):
-                                                                                         2. WS-02 has BitLocker disabled — Risk: Data exposure if stolen
-                                                                                            → Action: Enable BitLocker via GPO or manual powershell
-                                                                                         3. Ubuntu-Auth01 auditd not logging logins — Risk: No forensics trail
-                                                                                            → Action: Import audit rules, restart auditd
+The audit is read-only — it doesn't change anything on the device. If you want to apply fixes, do that manually following the change management process and re-run the audit to verify.
 
-                                                                                         MEDIUM FINDINGS (address in next quarter):
-                                                                                         4. SSH banners not customized on 3 servers
-                                                                                         5. File permissions on /var/log/secure not restricted (644 vs 600)
-                                                                                         ```
+### linux-hardening.yml
 
-                                                                                         **JSON for Integration:**
+CIS Ubuntu Linux Benchmark Level 1 and Level 2. Split into tagged sections so you can run just what you need:
 
-                                                                                         ```json
-                                                                                         {
-                                                                                           "timestamp": "2026-04-04T14:32:00Z",
-                                                                                           "environment": "production",
-                                                                                           "overall_compliance": 0.87,
-                                                                                           "findings": [
-                                                                                             {
-                                                                                               "id": "SNMP-v1-enabled",
-                                                                                               "severity": "critical",
-                                                                                               "cvss": 7.5,
-                                                                                               "affected_systems": ["Router1"],
-                                                                                               "description": "SNMPv1 community string 'public' detected",
-                                                                                               "remediation": "Disable snmp-server community public; use SNMPv3",
-                                                                                               "change_id": "CHG-143"
-                                                                                             },
-                                                                                             ...
-                                                                                           ]
-                                                                                         }
-                                                                                         ```
+**Level 1 (low-risk, run first):**
+- SSH: disable root login, disable password auth, set MaxAuthTries 4, require SSHv2
+- Filesystem: disable cramfs, freevxfs, jffs2, usb-storage kernel modules
+- Accounts: password max age 90 days, minimum age 7 days, warn at 14 days
+- Services: disable avahi-daemon, cups, rpcbind
 
-                                                                                         ## ITIL Change Management Integration
+**Level 2 (higher impact, test first):**
+- Sysctl: IP forwarding off, ICMP redirects rejected, TCP SYN cookies enabled, rp_filter on
+- PAM: lockout after 5 failed attempts, history of 5 passwords
+- Auditd: login events, sudo use, privileged command execution
+- sudo logging to syslog
 
-                                                                                         Every hardening change creates a change record for CAB (Change Advisory Board) approval:
+### windows-hardening.yml
 
-                                                                                         **Before running hardening:**
+Uses win_regedit and win_shell to enforce hardening. Key controls:
+- UAC set to highest level, consent prompt on secure desktop
+- Windows Firewall enabled on all profiles, default-deny inbound
+- RDP disabled unless required; if enabled, NLA enforced
+- Account lockout: 5 attempts, 30-minute lockout duration
+- Audit policy: logon events, privilege use, process creation
+- Security event log size: 1GB
+- WinRM restricted to management VLAN (10.10.30.0/24)
 
-                                                                                         ```bash
-                                                                                         # 1. Generate change record
-                                                                                         ansible-playbook playbooks/generate-change-record.yml \
-                                                                                           -e "change_type=Standard" \
-                                                                                           -e "affected_systems=all-linux-servers" \
-                                                                                           -e "description=CIS Level 1 hardening on Ubuntu servers"
-                                                                                         # Outputs: changes/CHG-144-linux-hardening-2026-04-04.md
+Uses NTLM for WinRM transport since there's no AD in the home lab (no Kerberos).
 
-                                                                                         # 2. Review the record, submit to CAB
-                                                                                         # 3. Get approval
-                                                                                         # 4. Then run hardening
-                                                                                         ```
+### compliance-report.yml
 
-                                                                                         **Change Record Template (auto-generated):**
+Gathers registered variables from across all playbooks and generates a timestamped HTML report listing every check, its pass/fail status, and remediation guidance for failures. Reports land in /tmp/compliance-reports/ on the control node.
 
-                                                                                         ```markdown
-                                                                                         # CHG-144: CIS Level 1 Hardening — Ubuntu Servers
+## ITIL Change Management
 
-                                                                                         Category:       Standard Change
-                                                                                         Requested By:   Calvin
-                                                                                         Date:           2026-04-04
-                                                                                         Approval:       [PENDING]
+Every hardening run that modifies a system needs a change record before it runs. See docs/itil-change-process.md for the full workflow.
 
-                                                                                         ## What's Changing
+Standard changes (pre-approved, low risk) — CIS Level 1 SSH hardening, enabling auditd, setting password policies. Fast-track checklist, no CAB meeting required.
 
-                                                                                         Enforce CIS Benchmarks Level 1 on:
-                                                                                         - Ubuntu-DNS01, Ubuntu-DNS02
-                                                                                         - Ubuntu-FileShare01
-                                                                                         - Ubuntu-Auth01
+Normal changes (higher risk) — CIS Level 2 sysctl changes, PAM modifications, WinRM reconfiguration. Full CAB review with impact assessment and rollback plan.
 
-                                                                                         Changes include:
-                                                                                         - SSH: PermitRootLogin=no, MaxAuthTries=4
-                                                                                         - Auditd: Enable, load login audit rules
-                                                                                         - Filesystems: Disable cramfs, freevxfs, jffs2, hfs, hfsplus, udf
-                                                                                         - Sysctl: IP forwarding=0, ICMP redirects=0, SYN cookies=1
+Emergency changes — only used if applying a critical patch outside the normal cycle. Must be documented within 2 hours of the change being made.
 
-                                                                                         ## Impact Assessment
+## Certifications this covers
 
-                                                                                         Risk Level: LOW
-                                                                                         - Changes are defensive only (restrict bad behavior, not enable new services)
-                                                                                         - Tested on dev clones first ✓
-                                                                                         - Rollback plan: Restore from git backup (< 5 min per server)
+CCNA 200-301 — Cisco IOS hardening via SSH, SNMP v3, NTP, ACL verification, understanding of show commands for compliance auditing
 
-                                                                                         Downtime: None (all changes applied without restart)
+CompTIA Security+ — CIS benchmarks, attack surface reduction, defense in depth, compliance automation, evidence preservation via audit logs
 
-                                                                                         ## Verification
+ISC2 CC — Configuration management, access control enforcement, least privilege (SSH key auth, no root logins), organizational compliance
 
-                                                                                         After playbook runs:
-                                                                                         1. SSH to each server, verify PermitRootLogin=no in /etc/ssh/sshd_config
-                                                                                         2. Check auditd status: systemctl status auditd
-                                                                                         3. Run audit again: ansible-playbook playbooks/linux-hardening.yml --check
-                                                                                            Expected: PASS (no changes needed)
+ITIL 4 — Automated testing reduces risk of failed changes; audit trail integrates with incident management; compliance dashboard supports problem management
 
-                                                                                         ## Rollback
+## Troubleshooting
 
-                                                                                         If any issues:
-                                                                                         1. Revert from git: git checkout roles/linux-cis/
-                                                                                         2. Run playbook in "undo" mode: ansible-playbook playbooks/linux-hardening.yml -e mode=rollback
-                                                                                         3. Takes ~5 minutes per server
+**Ansible can't connect to Cisco device:**
+Make sure network_cli is set in the inventory and the device has SSH enabled. The playbook uses ios as the network OS. Test with `ansible cisco_devices -m ios_command -a "commands='show version'"`.
 
-                                                                                         Approval:      ______________________   Date: __________
-                                                                                         CAB Sign-off:  ______________________   Date: __________
-                                                                                         ```
+**Windows host unreachable:**
+WinRM must be enabled: `Enable-PSRemoting -Force` on the target. The inventory uses NTLM auth — if you see 401 errors, verify the ansible_user and ansible_password are correct and the account has admin rights.
 
-                                                                                         ## Certifications Demonstrated
-
-                                                                                         **CCNA:** Cisco device audit, SSH hardening on network infrastructure, SNMP/NTP config validation, ACL verification
-
-                                                                                         **CompTIA Security+:** CIS benchmarks, attack surface reduction, defense in depth, compliance automation, evidence preservation (audit logs)
-
-                                                                                         **ISC2 CC:** Configuration management, access control enforcement, organizational compliance, least privilege (SSH key auth, no root logins)
-
-                                                                                         **ITIL 4:** Automated testing reduces risk of failed changes; audit trail integrates with incident management; compliance dashboard supports problem management; change records enable release management
-
-                                                                                         ## Troubleshooting
-
-                                                                                         Ansible can't connect to Cisco device:
-
-                                                                                         ```bash
-                                                                                         # Test SSH connectivity:
-                                                                                         ssh -i keys/cisco.key admin@10.10.30.1
-
-                                                                                         # Check Ansible inventory syntax:
-                                                                                         ansible-inventory -i inventory/hosts.yml --list
-
-                                                                                         # Run with verbose debug:
-                                                                                         ansible-playbook playbooks/cisco-audit.yml -v -vv
-
-                                                                                         # Common issue: SSH key permissions
-                                                                                         chmod 600 keys/cisco.key
-                                                                                         ```
-
-                                                                                         Windows hosts failing WinRM tasks:
-
-                                                                                         ```powershell
-                                                                                         # On Windows target, enable WinRM:
-                                                                                         Enable-PSRemoting -Force
-                                                                                         Set-NetFirewallRule -Name "WINRM-HTTP-In-TCP" -Enabled True
-                                                                                         ```
-
-                                                                                         Playbook reports pass but you know a control is wrong:
-
-                                                                                         ```bash
-                                                                                         # Check what Ansible sees on the target:
-                                                                                         ansible windows_workstations -m setup | grep -i bitlocker
-
-                                                                                         # Verify the control definition:
-                                                                                         cat vars/windows-controls.yml | grep -A 5 bitlocker
-
-                                                                                         # Test a single task:
-                                                                                         ansible-playbook playbooks/windows-hardening.yml --tags bitlocker --check
-                                                                                         ```
-
-                                                                                         ## Next Steps
-
-                                                                                         1. Customize `inventory/hosts.yml` with your environment
-                                                                                         2. 2. Review CIS benchmarks in `vars/` — not all controls apply to every org
-                                                                                            3. 3. Run in `--check` mode first to see what changes without applying
-                                                                                               4. 4. Set up JIRA integration to auto-create tickets for high-severity findings
-                                                                                                  5. 5. Schedule weekly audits via cron (run playbooks Monday 2 AM)
-                                                                                                     6. 6. Integrate compliance dashboard with your monitoring stack (Project 4)
+**False positives in the report:**
+Some controls don't apply to every environment. If a check is flagging correctly configured settings as failures, review the variable definitions in the playbook vars section and adjust the expected values to match your baseline.
