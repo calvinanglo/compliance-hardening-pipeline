@@ -1,6 +1,6 @@
 ---
 - name: Generate Compliance Report
-  hosts: all
+  hosts: linux_servers
   gather_facts: yes
   become: yes
 

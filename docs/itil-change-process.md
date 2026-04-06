@@ -62,68 +62,68 @@ Post-review:   ________________  Date: ________
 Before every hardening run:
 
 1. Run the audit first in --check mode to see what will change
-2. 2. Fill out the change template above
-   3. 3. For Standard changes: self-approve and proceed
-      4. 4. For Normal changes: schedule the maintenance window, get CAB sign-off
-         5. 5. Run the playbook
-            6. 6. Run audit again in --check mode to confirm no changes remain
-               7. 7. Document results in the change record (Post-review section)
-                 
-                  8. ## Real Example: CHG-014
-                 
-                  9. ```
-                     # CHG-014: CIS Level 1 SSH Hardening - Linux Servers
+2. Fill out the change template above
+3. For Standard changes: self-approve and proceed
+4. For Normal changes: schedule the maintenance window, get CAB sign-off
+5. Run the playbook
+6. Run audit again in --check mode to confirm no changes remain
+7. Document results in the change record (Post-review section)
 
-                     Category:       Standard Change
-                     Requested By:   Calvin
-                     Date:           2026-04-05
-                     Scheduled:      2026-04-05 02:00 AM
-                     Approval:       SELF-APPROVED (Standard)
+## Real Example: CHG-014
 
-                     ## What's Changing
+```
+# CHG-014: CIS Level 1 SSH Hardening - Linux Servers
 
-                     Target systems: linux_servers group (ubuntu-dns01, ubuntu-fileshare01, ubuntu-auth01)
-                     Ansible playbook: linux-hardening.yml --tags ssh,cis-level-1
+Category:       Standard Change
+Requested By:   Calvin
+Date:           2026-04-05
+Scheduled:      2026-04-05 02:00 AM
+Approval:       SELF-APPROVED (Standard)
 
-                     Changes applied:
-                     - PermitRootLogin: no
-                     - MaxAuthTries: 4
-                     - PermitEmptyPasswords: no
-                     - X11Forwarding: no
-                     - LoginGraceTime: 60
-                     - Protocol: 2
+## What's Changing
 
-                     ## Impact Assessment
+Target systems: linux_servers group (ubuntu-dns01, ubuntu-fileshare01, ubuntu-auth01)
+Ansible playbook: linux-hardening.yml --tags ssh,cis-level-1
 
-                     Risk Level: LOW
-                     No downtime. SSH changes apply on service restart.
-                     Root logins were not in use anyway.
-                     Tested: Verified on dev VM clone first, SSH still works after changes.
+Changes applied:
+- PermitRootLogin: no
+- MaxAuthTries: 4
+- PermitEmptyPasswords: no
+- X11Forwarding: no
+- LoginGraceTime: 60
+- Protocol: 2
 
-                     ## Verification
+## Impact Assessment
 
-                     After run:
-                     1. SSH to each server, check sshd_config values match above
-                     2. Confirm SSH still works: ssh calvin@10.10.10.5
-                     3. Re-run: ansible-playbook linux-hardening.yml --tags ssh --check
-                        Expected: 0 tasks changed
+Risk Level: LOW
+No downtime. SSH changes apply on service restart.
+Root logins were not in use anyway.
+Tested: Verified on dev VM clone first, SSH still works after changes.
 
-                     ## Rollback
+## Verification
 
-                     If SSH breaks after the change:
-                     1. Console access to server (out-of-band, VLAN 30 jump box)
-                     2. Edit /etc/ssh/sshd_config manually, revert changed values
-                     3. systemctl restart sshd
-                     4. Takes ~5 minutes
+After run:
+1. SSH to each server, check sshd_config values match above
+2. Confirm SSH still works: ssh calvin@10.10.10.5
+3. Re-run: ansible-playbook linux-hardening.yml --tags ssh --check
+   Expected: 0 tasks changed
 
-                     ## Sign-off
+## Rollback
 
-                     Approval:      Calvin   Date: 2026-04-05
-                     Post-review:   Calvin   Date: 2026-04-05 - PASS, all servers accessible via SSH
-                     ```
+If SSH breaks after the change:
+1. Console access to server (out-of-band, VLAN 30 jump box)
+2. Edit /etc/ssh/sshd_config manually, revert changed values
+3. systemctl restart sshd
+4. Takes ~5 minutes
 
-                     ## Tips Learned
+## Sign-off
 
-                     The first time I ran this, I had PermitRootLogin set to no but one of the servers was using root for cron jobs pulling config from a backup server. Had to roll that back and switch the cron user to a service account before re-applying. That's why the dev testing step matters.
+Approval:      Calvin   Date: 2026-04-05
+Post-review:   Calvin   Date: 2026-04-05 - PASS, all servers accessible via SSH
+```
 
-                     Also, running with --diff flag alongside --check is really useful. It shows you exactly what will change in the files before applying. Much better than just seeing "would change" with no detail.
+## Tips Learned
+
+The first time I ran this, I had PermitRootLogin set to no but one of the servers was using root for cron jobs pulling config from a backup server. Had to roll that back and switch the cron user to a service account before re-applying. That's why the dev testing step matters.
+
+Also, running with --diff flag alongside --check is really useful. It shows you exactly what will change in the files before applying. Much better than just seeing "would change" with no detail.

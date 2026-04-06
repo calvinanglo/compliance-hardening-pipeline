@@ -1,0 +1,7 @@
+*.retry
+*.log
+.env
+.DS_Store
+*.swp
+Thumbs.db
+/tmp/
