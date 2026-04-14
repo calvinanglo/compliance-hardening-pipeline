@@ -169,7 +169,7 @@
       win_shell: >
         $rule = New-NetFirewallRule -DisplayName "WinRM-Management-Only"
         -Direction Inbound -Protocol TCP -LocalPort 5985
-        -RemoteAddress 10.10.30.0/24 -Action Allow;
+        -RemoteAddress 10.10.99.0/24 -Action Allow;
         Get-NetFirewallRule -DisplayName "Windows Remote Management*" |
         Where-Object {$_.DisplayName -ne "WinRM-Management-Only"} |
         Set-NetFirewallRule -Action Block

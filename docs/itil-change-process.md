@@ -111,7 +111,7 @@ After run:
 ## Rollback
 
 If SSH breaks after the change:
-1. Console access to server (out-of-band, VLAN 30 jump box)
+1. Console access to server (out-of-band, VLAN 99 jump box)
 2. Edit /etc/ssh/sshd_config manually, revert changed values
 3. systemctl restart sshd
 4. Takes ~5 minutes

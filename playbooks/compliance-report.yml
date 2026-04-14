@@ -1,5 +1,9 @@
 ---
-- name: Generate Compliance Report
+# Compliance Report Generator
+# Aggregates audit results from Linux, Windows, and Cisco checks
+# Run with: ansible-playbook playbooks/compliance-report.yml -i inventory/hosts.yml
+
+- name: Linux Compliance Checks
   hosts: linux_servers
   gather_facts: yes
   become: yes
@@ -51,38 +55,199 @@
       changed_when: false
       failed_when: false
 
+    - name: Check if AIDE is installed
+      command: which aide
+      register: aide_installed
+      changed_when: false
+      failed_when: false
+
     - name: Check AIDE database exists
       stat:
         path: /var/lib/aide/aide.db
       register: aide_db
 
-    - name: Collect last AIDE check result
-      command: tail -5 /var/log/aide-check.log
-      register: aide_last_run
+    - name: Check rsyslog forwarding to Wazuh
+      command: grep -c "10.10.20.10" /etc/rsyslog.conf
+      register: rsyslog_wazuh
       changed_when: false
       failed_when: false
 
-    - name: Write compliance report
+    - name: Write Linux compliance report
       copy:
         content: |
           Compliance Report - {{ inventory_hostname }}
           Generated: {{ timestamp }}
           OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
           Kernel: {{ kernel_version.stdout }}
+          Type: Linux Server
 
-          [CHECKS]
-          auditd running:         {{ 'PASS' if auditd_status.stdout == 'active' else 'FAIL' }}
-          AppArmor enabled:       {{ 'PASS' if apparmor_status.rc == 0 else 'FAIL' }}
-          PermitRootLogin no:     {{ 'PASS' if 'permitrootlogin no' in sshd_config_dump.stdout | lower else 'FAIL' }}
-          Empty password accounts:{{ 'PASS' if empty_pw_accounts.stdout == '' else 'FAIL - ' + empty_pw_accounts.stdout }}
-          Firewall active:        {{ 'PASS' if ufw_status.stdout == 'active' else 'WARN - check iptables' }}
-          AIDE database exists:   {{ 'PASS' if aide_db.stat.exists else 'FAIL' }}
-
-          [AIDE LAST RUN]
-          {{ aide_last_run.stdout | default('No AIDE log found') }}
+          [CIS CHECKS]
+          auditd running:           {{ 'PASS' if auditd_status.stdout == 'active' else 'FAIL' }}
+          AppArmor enabled:         {{ 'PASS' if apparmor_status.rc == 0 else 'FAIL' }}
+          PermitRootLogin no:       {{ 'PASS' if 'permitrootlogin no' in sshd_config_dump.stdout | lower else 'FAIL' }}
+          Empty password accounts:  {{ 'PASS' if empty_pw_accounts.stdout == '' else 'FAIL - ' + empty_pw_accounts.stdout }}
+          Firewall active:          {{ 'PASS' if ufw_status.stdout == 'active' else 'WARN - check iptables' }}
+          AIDE installed:           {{ 'PASS' if aide_installed.rc == 0 else 'FAIL' }}
+          AIDE database exists:     {{ 'PASS' if aide_db.stat.exists else 'FAIL' }}
+          Syslog to Wazuh:          {{ 'PASS' if rsyslog_wazuh.rc == 0 else 'FAIL' }}
         dest: "{{ report_dir }}/{{ inventory_hostname }}-compliance-{{ timestamp }}.txt"
       delegate_to: localhost
 
-    - name: Print compliance summary
-      debug:
-        msg: "Report written to {{ report_dir }}/{{ inventory_hostname }}-compliance-{{ timestamp }}.txt"
+- name: Cisco Compliance Checks
+  hosts: cisco_devices
+  gather_facts: no
+  connection: network_cli
+
+  vars:
+    report_dir: "/tmp/compliance-reports"
+    timestamp: "{{ lookup('pipe', 'date +%Y%m%dT%H%M%S') }}"
+
+  tasks:
+
+    - name: Check SSH version
+      cisco.ios.ios_command:
+        commands: show ip ssh
+      register: ssh_check
+      changed_when: false
+
+    - name: Check SNMPv3 user
+      cisco.ios.ios_command:
+        commands: show snmp user
+      register: snmp_check
+      changed_when: false
+
+    - name: Check NTP status
+      cisco.ios.ios_command:
+        commands: show ntp status
+      register: ntp_check
+      changed_when: false
+
+    - name: Check syslog config
+      cisco.ios.ios_command:
+        commands: show logging
+      register: logging_check
+      changed_when: false
+
+    - name: Check HTTP server
+      cisco.ios.ios_command:
+        commands: show ip http server status
+      register: http_check
+      changed_when: false
+
+    - name: Check CDP status
+      cisco.ios.ios_command:
+        commands: show cdp
+      register: cdp_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Write Cisco compliance report
+      copy:
+        content: |
+          Compliance Report - {{ inventory_hostname }}
+          Generated: {{ timestamp }}
+          Type: Cisco IOS Device
+
+          [HARDENING CHECKS]
+          SSH version 2:            {{ 'PASS' if 'SSH Enabled - version 2.0' in ssh_check.stdout[0] else 'FAIL' }}
+          SNMPv3 configured:        {{ 'PASS' if 'wazuh-monitor' in snmp_check.stdout[0] else 'FAIL' }}
+          NTP synchronized:         {{ 'PASS' if 'synchronized' in ntp_check.stdout[0] else 'FAIL' }}
+          Syslog to 10.10.20.10:   {{ 'PASS' if '10.10.20.10' in logging_check.stdout[0] else 'FAIL' }}
+          HTTP server disabled:     {{ 'PASS' if 'HTTP server enabled: no' in http_check.stdout[0] else 'FAIL' }}
+          CDP disabled:             {{ 'PASS' if cdp_check.failed or 'not enabled' in cdp_check.stdout[0] | lower else 'FAIL' }}
+        dest: "{{ report_dir }}/{{ inventory_hostname }}-compliance-{{ timestamp }}.txt"
+      delegate_to: localhost
+
+- name: Windows Compliance Checks
+  hosts: windows_workstations
+  gather_facts: yes
+
+  vars:
+    report_dir: "/tmp/compliance-reports"
+    timestamp: "{{ ansible_date_time.iso8601_basic }}"
+
+  tasks:
+
+    - name: Check UAC is enabled
+      win_reg_stat:
+        path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+        name: EnableLUA
+      register: uac_check
+
+    - name: Check Windows Firewall status
+      win_shell: (Get-NetFirewallProfile -Profile Domain,Public,Private).Enabled -contains $true
+      register: fw_check
+
+    - name: Check RDP is disabled
+      win_reg_stat:
+        path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server
+        name: fDenyTSConnections
+      register: rdp_check
+
+    - name: Check account lockout threshold
+      win_shell: (net accounts | Select-String 'Lockout threshold').ToString().Split(':')[1].Trim()
+      register: lockout_check
+
+    - name: Check Windows Defender status
+      win_shell: (Get-MpComputerStatus).RealTimeProtectionEnabled
+      register: defender_check
+      failed_when: false
+
+    - name: Write Windows compliance report
+      copy:
+        content: |
+          Compliance Report - {{ inventory_hostname }}
+          Generated: {{ timestamp }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Type: Windows Workstation
+
+          [CIS CHECKS]
+          UAC enabled:              {{ 'PASS' if uac_check.value == 1 else 'FAIL' }}
+          Windows Firewall:         {{ 'PASS' if 'True' in fw_check.stdout else 'FAIL' }}
+          RDP disabled:             {{ 'PASS' if rdp_check.value == 1 else 'FAIL' }}
+          Account lockout set:      {{ 'PASS' if lockout_check.stdout | trim | int > 0 else 'FAIL' }}
+          Defender real-time:       {{ 'PASS' if 'True' in defender_check.stdout | default('False') else 'FAIL' }}
+        dest: "{{ report_dir }}/{{ inventory_hostname }}-compliance-{{ timestamp }}.txt"
+      delegate_to: localhost
+
+- name: Aggregate Compliance Reports
+  hosts: localhost
+  gather_facts: yes
+  connection: local
+
+  vars:
+    report_dir: "/tmp/compliance-reports"
+    timestamp: "{{ ansible_date_time.iso8601_basic }}"
+
+  tasks:
+
+    - name: Find all individual reports
+      find:
+        paths: "{{ report_dir }}"
+        patterns: "*-compliance-*.txt"
+      register: report_files
+
+    - name: Read all reports
+      slurp:
+        src: "{{ item.path }}"
+      register: report_contents
+      loop: "{{ report_files.files }}"
+
+    - name: Generate aggregate report
+      copy:
+        content: |
+          ====================================================
+          AGGREGATE COMPLIANCE REPORT
+          Generated: {{ timestamp }}
+          Total hosts scanned: {{ report_files.files | length }}
+          ====================================================
+
+          {% for report in report_contents.results %}
+          {{ report.content | b64decode }}
+          ---
+          {% endfor %}
+
+          ====================================================
+          END OF REPORT
+          ====================================================
+        dest: "{{ report_dir }}/aggregate-compliance-{{ timestamp }}.txt"

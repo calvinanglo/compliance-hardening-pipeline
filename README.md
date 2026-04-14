@@ -2,6 +2,27 @@
 
 Ansible automation for enforcing CIS benchmarks across network infrastructure and server environments. Audits Cisco device configs, hardens Linux/Windows hosts, and generates compliance reports with ITIL change control.
 
+## Project Series
+
+This is **Project 3 of 5** in a production enterprise environment build. Each project builds on the previous one.
+
+| # | Project | What It Adds |
+|---|---------|-------------|
+| 1 | [Enterprise Network Segmentation](https://github.com/calvinanglo/enterprise-network-segmentation) | VLANs, OSPF, ACLs, pfSense firewall |
+| 2 | [Wazuh SIEM Deployment](https://github.com/calvinanglo/wazuh-siem-deployment) | Centralized log collection, threat detection, incident response |
+| 3 | [Compliance Hardening Pipeline](https://github.com/calvinanglo/compliance-hardening-pipeline) | Automated CIS benchmarks across all devices |
+| 4 | [Network Monitoring Stack](https://github.com/calvinanglo/network-monitoring-stack) | Prometheus, Grafana, SNMP monitoring, SLA dashboards |
+| 5 | [DR & BC Simulation](https://github.com/calvinanglo/dr-bc-simulation) | Disaster recovery testing, backup validation, RTO/RPO measurement |
+
+### Prerequisites
+- **Complete [Project 1](https://github.com/calvinanglo/enterprise-network-segmentation) first** — the Cisco devices and network topology must be in place
+- **Complete [Project 2](https://github.com/calvinanglo/wazuh-siem-deployment) first** — the hardening playbooks forward logs to Wazuh at 10.10.20.10
+- Ansible control node with Python 3 and SSH access to all devices
+- Linux servers on VLAN 20, Windows workstations on VLAN 10
+
+### What's Next
+After completing this project, continue to [Project 4: Network Monitoring Stack](https://github.com/calvinanglo/network-monitoring-stack) to add Prometheus/Grafana observability. The monitoring stack uses the same SNMPv3 credentials configured in Project 1 and provides the SLA dashboards that complement the security monitoring from Project 2.
+
 ## What This Does
 
 This pipeline automates security compliance enforcement and continuous auditing. Instead of manually checking whether SSH v2 is enabled on 50 servers, you run a playbook once and get a compliance report showing exactly which hosts fail and why.
@@ -10,7 +31,7 @@ The four main playbooks:
 - **cisco-audit.yml** — Connects to network devices, grabs running configs, checks them against hardening standards, reports gaps
 - **linux-hardening.yml** — Enforces CIS Level 1 + Level 2 controls on Ubuntu/Debian: SSH config, file permissions, auditd, kernel parameters
 - **windows-hardening.yml** — GPO + PowerShell hardening for Windows 10/11 workstations: UAC, Windows Firewall, audit policies
-- **compliance-report.yml** — Aggregates audit results from all playbooks into a single HTML report
+- **compliance-report.yml** — Aggregates audit results from Linux, Cisco, and Windows hosts into a single compliance report
 
 ## How It Works
 
@@ -111,13 +132,13 @@ Uses win_regedit and win_shell to enforce hardening. Key controls:
 - Account lockout: 5 attempts, 30-minute lockout duration
 - Audit policy: logon events, privilege use, process creation
 - Security event log size: 1GB
-- WinRM restricted to management VLAN (10.10.30.0/24)
+- WinRM restricted to management VLAN (10.10.99.0/24)
 
 Uses NTLM for WinRM transport since there's no AD in the home lab (no Kerberos).
 
 ### compliance-report.yml
 
-Gathers registered variables from across all playbooks and generates a timestamped HTML report listing every check, its pass/fail status, and remediation guidance for failures. Reports land in /tmp/compliance-reports/ on the control node.
+Runs compliance checks across Linux servers, Cisco devices, and Windows workstations, then generates a timestamped aggregate report listing every check, its pass/fail status, and remediation guidance for failures. Individual and aggregate reports land in /tmp/compliance-reports/ on the control node.
 
 ## ITIL Change Management
 
